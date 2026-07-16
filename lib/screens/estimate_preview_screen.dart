@@ -883,6 +883,7 @@ class _ItemsTable extends StatelessWidget {
                 const _TableCell('', alignRight: true, height: 30),
                 _TableCell(
                   isLastPart ? headerAmount : '',
+                  bold: true,
                   alignRight: true,
                   height: 30,
                 ),
