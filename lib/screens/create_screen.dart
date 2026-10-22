@@ -21,6 +21,7 @@ class CreateScreen extends StatefulWidget {
 
 class _CreateScreenState extends State<CreateScreen> {
   final _formKey = GlobalKey<FormState>();
+  final ScrollController _scrollController = ScrollController();
 
   final _clientNameController = TextEditingController();
   final _dateController = TextEditingController();
@@ -66,6 +67,7 @@ class _CreateScreenState extends State<CreateScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _clientNameController.dispose();
     _dateController.dispose();
     _addressController.dispose();
@@ -139,26 +141,43 @@ class _CreateScreenState extends State<CreateScreen> {
     });
   }
 
-  void _focusNewItem(_EditableLineItem item) {
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted || !_items.contains(item)) return;
+  Future<void> _focusNewItem(_EditableLineItem item) async {
+    // Wait for the newly inserted sliver item to be laid out.
+    await WidgetsBinding.instance.endOfFrame;
 
-      final fieldContext = item.descriptionFieldKey.currentContext;
+    if (!mounted || !_items.contains(item)) return;
+    if (!_scrollController.hasClients) return;
 
-      if (fieldContext == null) return;
+    // Scroll to the end so lazy list items are built.
+    await _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
 
+    if (!mounted || !_items.contains(item)) return;
+
+    // Allow the sliver to finish building the new input.
+    await WidgetsBinding.instance.endOfFrame;
+
+    if (!mounted || !_items.contains(item)) return;
+
+    final fieldContext = item.descriptionFieldKey.currentContext;
+
+    if (fieldContext != null && fieldContext.mounted) {
       await Scrollable.ensureVisible(
         fieldContext,
-        duration: const Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 250),
         curve: Curves.easeInOut,
         alignment: 0.25,
         alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
       );
+    }
 
-      if (!mounted || !_items.contains(item)) return;
+    if (!mounted || !_items.contains(item)) return;
 
-      item.descriptionFocusNode.requestFocus();
-    });
+    // Give the newly added description field keyboard focus.
+    item.descriptionFocusNode.requestFocus();
   }
 
   Estimate? _buildDraftEstimateFromForm() {
@@ -298,6 +317,7 @@ class _CreateScreenState extends State<CreateScreen> {
     return Scaffold(
       backgroundColor: neutral,
       body: CustomScrollView(
+        controller: _scrollController,
         slivers: [
           CustomAppBar(),
 
@@ -685,6 +705,7 @@ class _LabeledInput extends StatelessWidget {
   final FocusNode? focusNode;
 
   const _LabeledInput({
+    super.key,
     required this.label,
     required this.hint,
     required this.controller,
@@ -847,6 +868,7 @@ class _HeaderCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _LabeledInput(
+            key: item.descriptionFieldKey,
             label: 'SECTION HEADER',
             hint: 'e.g. Materials, Labour, Finishing',
             controller: item.descriptionController,
@@ -969,6 +991,7 @@ class _LineItemCard extends StatelessWidget {
           const SizedBox(height: 8),
 
           _LabeledInput(
+            key: item.descriptionFieldKey,
             label: 'ITEM DESCRIPTION',
             hint: 'e.g. Mahogany Timber Planks',
             controller: item.descriptionController,

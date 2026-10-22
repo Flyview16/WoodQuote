@@ -75,6 +75,7 @@ class _EstimatePreviewScreenState extends State<EstimatePreviewScreen> {
       setState(() {
         _estimate = widget.estimate;
         _loading = false;
+        _initialZoomApplied = false;
       });
       return;
     }
@@ -88,6 +89,7 @@ class _EstimatePreviewScreenState extends State<EstimatePreviewScreen> {
     setState(() {
       _estimate = fullEstimate ?? widget.estimate;
       _loading = false;
+      _initialZoomApplied = false;
     });
   }
 
@@ -388,6 +390,13 @@ class _EstimatePreviewScreenState extends State<EstimatePreviewScreen> {
       );
     }
 
+    final sortedItems = List<LineItem>.from(estimate.lineItems)
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+
+    final previewPageCount = _ItemsTable.calculatePageRows(sortedItems).length;
+
+    final hasMultiplePages = previewPageCount > 1;
+
     final double bottomSpace = estimate.status == EstimateStatus.draft
         ? 190
         : 250;
@@ -419,9 +428,16 @@ class _EstimatePreviewScreenState extends State<EstimatePreviewScreen> {
                                 ) {
                                   if (!mounted) return;
 
-                                  final scale =
-                                      (constraints.maxWidth / _paperWidth)
-                                          .clamp(0.42, 1.0);
+                                  final fitWidthScale =
+                                      constraints.maxWidth / _paperWidth;
+
+                                  final double scale = hasMultiplePages
+                                      ? (fitWidthScale * 0.70)
+                                            .clamp(0.28, 0.45)
+                                            .toDouble()
+                                      : fitWidthScale
+                                            .clamp(0.42, 1.0)
+                                            .toDouble();
 
                                   _previewController.value = Matrix4.identity()
                                     ..translateByDouble(0.0, 0.0, 0.0, 1.0)
@@ -435,9 +451,9 @@ class _EstimatePreviewScreenState extends State<EstimatePreviewScreen> {
                                 borderRadius: BorderRadius.circular(14),
                                 child: InteractiveViewer(
                                   transformationController: _previewController,
-                                  minScale: 0.35,
+                                  minScale: 0.25,
                                   maxScale: 3.0,
-                                  boundaryMargin: const EdgeInsets.all(500),
+                                  boundaryMargin: const EdgeInsets.all(1000),
                                   constrained: false,
                                   child: RepaintBoundary(
                                     key: _documentKey,
@@ -529,25 +545,39 @@ class _EstimatePagesView extends StatelessWidget {
     final sortedItems = List<LineItem>.from(estimate.lineItems)
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
-    final pages = _ItemsTable.pageCount(sortedItems);
+    final pageRows = _ItemsTable.calculatePageRows(sortedItems);
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(pages, (index) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: index == pages - 1 ? 0 : 16),
+    int nextStartRow = 0;
+
+    final pageWidgets = <Widget>[];
+
+    for (int index = 0; index < pageRows.length; index++) {
+      final startRow = nextStartRow;
+      final rowCount = pageRows[index];
+
+      nextStartRow += rowCount;
+
+      pageWidgets.add(
+        Padding(
+          padding: EdgeInsets.only(
+            bottom: index == pageRows.length - 1 ? 0 : 16,
+          ),
           child: SizedBox(
             width: paperWidth,
             height: paperHeight,
             child: _EstimateDocumentView(
               estimate: estimate,
               pageIndex: index,
-              pageCount: pages,
+              pageCount: pageRows.length,
+              startRow: startRow,
+              rowLimit: rowCount,
             ),
           ),
-        );
-      }),
-    );
+        ),
+      );
+    }
+
+    return Column(mainAxisSize: MainAxisSize.min, children: pageWidgets);
   }
 }
 
@@ -555,11 +585,15 @@ class _EstimateDocumentView extends StatelessWidget {
   final Estimate estimate;
   final int pageIndex;
   final int pageCount;
+  final int startRow;
+  final int rowLimit;
 
   const _EstimateDocumentView({
     required this.estimate,
     required this.pageIndex,
     required this.pageCount,
+    required this.startRow,
+    required this.rowLimit,
   });
 
   @override
@@ -573,15 +607,6 @@ class _EstimateDocumentView extends StatelessWidget {
 
     final isFirstPage = pageIndex == 0;
     final isLastPage = pageIndex == pageCount - 1;
-
-    final startRow = isFirstPage
-        ? 0
-        : _ItemsTable._visibleRows +
-              (pageIndex - 1) * _ItemsTable._continuationRows;
-
-    final rowLimit = isFirstPage
-        ? _ItemsTable._visibleRows
-        : _ItemsTable._continuationRows;
 
     return Container(
       width: double.infinity,
@@ -889,10 +914,50 @@ class _ItemsTable extends StatelessWidget {
     this.showTotal = true,
   });
 
-  static const int _visibleRows = 14;
-  static const int _continuationRows = 28;
+  static const int firstPageCapacity = 22;
+  static const int continuationPageCapacity = 34;
 
+  // Reserve room for the grand total and document footer.
+  static const int firstPageFinalCapacity = 19;
+  static const int continuationPageFinalCapacity = 30;
+
+  static const int _minimumRows = 14;
   static const int _descriptionCharsPerRow = 55;
+
+  static List<int> calculatePageRows(List<LineItem> items) {
+    int remaining = countRequiredRows(items);
+
+    // Preserve the original minimum-height table for short estimates.
+    if (remaining <= firstPageFinalCapacity) {
+      return [remaining];
+    }
+
+    final pages = <int>[];
+
+    // First page: allow more rows unless the footer also fits.
+    final firstRows = remaining <= firstPageCapacity
+        ? firstPageFinalCapacity
+        : firstPageCapacity;
+
+    pages.add(firstRows);
+    remaining -= firstRows;
+
+    while (remaining > 0) {
+      if (remaining <= continuationPageFinalCapacity) {
+        pages.add(remaining);
+        break;
+      }
+
+      final rows = remaining <= continuationPageCapacity
+          ? continuationPageFinalCapacity
+          : continuationPageCapacity;
+
+      pages.add(rows);
+      remaining -= rows;
+    }
+
+    return pages;
+  }
 
   static int countRequiredRows(List<LineItem> items) {
     int count = 0;
@@ -908,16 +973,6 @@ class _ItemsTable extends StatelessWidget {
     }
 
     return count;
-  }
-
-  static int pageCount(List<LineItem> items) {
-    final rowCount = countRequiredRows(items);
-
-    if (rowCount <= _visibleRows) return 1;
-
-    final remaining = rowCount - _visibleRows;
-
-    return 1 + (remaining / _continuationRows).ceil();
   }
 
   @override
@@ -1036,7 +1091,7 @@ class _ItemsTable extends StatelessWidget {
       }
     }
 
-    while (tableRows.length < _visibleRows) {
+    while (tableRows.length < _minimumRows) {
       tableRows.add(emptyRow());
     }
 
