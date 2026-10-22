@@ -103,7 +103,7 @@ class EstimateDocumentService {
     return estimatesDirectory;
   }
 
-  Future<String?> savePdfToUserSelectedLocation(Estimate estimate) async {
+  Future<Uri?> savePdfToUserSelectedLocation(Estimate estimate) async {
     if (estimate.id == null) {
       throw Exception('Cannot save PDF for an estimate without an id.');
     }
@@ -116,23 +116,21 @@ class EstimateDocumentService {
           : 'client',
     );
 
-    final outputPath = await FilePicker.saveFile(
+    final outputUri = await FilePicker.saveFile(
       dialogTitle: 'Save estimate as PDF',
       fileName: 'estimate_${estimate.id}_$safeClientName.pdf',
       type: FileType.custom,
       allowedExtensions: ['pdf'],
+      mimeType: 'application/pdf',
       bytes: pdfBytes,
     );
 
-    if (outputPath == null) return null;
+    // The user cancelled the save dialog.
+    if (outputUri == null) return null;
 
-    final outputFile = File(outputPath);
-
-    if (!await outputFile.exists()) {
-      await outputFile.writeAsBytes(pdfBytes, flush: true);
-    }
-
-    return outputPath;
+    // FilePicker 12 already writes the supplied bytes.
+    // The returned URI may be a content:// URI on Android.
+    return outputUri;
   }
 
   Future<void> saveImageToGallery({

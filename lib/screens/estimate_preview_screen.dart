@@ -319,13 +319,13 @@ class _EstimatePreviewScreenState extends State<EstimatePreviewScreen> {
     if (estimate == null || estimate.id == null) return;
 
     await _runBusyTask(() async {
-      final savedPath = await _documentService.savePdfToUserSelectedLocation(
+      final savedUri = await _documentService.savePdfToUserSelectedLocation(
         estimate,
       );
 
       if (!mounted) return;
 
-      if (savedPath == null) {
+      if (savedUri == null) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('PDF save cancelled.')));
