@@ -162,39 +162,48 @@ class EstimateDocumentService {
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
     final total = estimate.computedTotal;
+
     final dateText = estimate.date == null
         ? 'No date'
         : DateFormat('MMM d, yyyy').format(estimate.date!);
 
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(24),
+        margin: const pw.EdgeInsets.all(38),
+        maxPages: 200,
         build: (context) {
-          return pw.Container(
-            padding: const pw.EdgeInsets.all(14),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-              children: [
-                _companyHeader(),
-                pw.SizedBox(height: _pdfTopSectionGap),
-                _estimateTitleBar(),
-                pw.SizedBox(height: _pdfTopSectionGap),
-                _customerAndMetaSection(estimate: estimate, dateText: dateText),
-                pw.SizedBox(height: _pdfTopSectionGap),
-                _descriptionSection(estimate),
-                pw.SizedBox(height: 11),
-                _itemsTable(items: documentItems, total: total),
-                pw.SizedBox(height: 24),
-                _footerSection(
-                  dateText: dateText,
-                  validity: estimate.validity,
-                  termsOfPayment: estimate.termsOfPayment,
-                ),
-                pw.Spacer(),
-              ],
+          return [
+            // These appear only once, on the first page.
+            _companyHeader(),
+            pw.SizedBox(height: _pdfTopSectionGap),
+            _estimateTitleBar(),
+            pw.SizedBox(height: _pdfTopSectionGap),
+            _customerAndMetaSection(estimate: estimate, dateText: dateText),
+            pw.SizedBox(height: _pdfTopSectionGap),
+            _descriptionSection(estimate),
+            pw.SizedBox(height: 11),
+
+            // Direct child of MultiPage: can span pages.
+            _itemsTable(items: documentItems, total: total),
+
+            _grandTotalRow(total),
+
+            // These appear only after the completed table.
+            pw.Inseparable(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  pw.SizedBox(height: 24),
+                  _footerSection(
+                    dateText: dateText,
+                    validity: estimate.validity,
+                    termsOfPayment: estimate.termsOfPayment,
+                  ),
+                ],
+              ),
             ),
-          );
+          ];
         },
       ),
     );
@@ -436,7 +445,7 @@ class EstimateDocumentService {
     required double total,
   }) {
     final currency = NumberFormat('#,##0.00', 'en_US');
-    const visibleRows = 14;
+    const minimumRows = 14;
 
     final tableRows = <pw.TableRow>[];
     int itemNumber = 0;
@@ -549,76 +558,70 @@ class EstimateDocumentService {
       }
     }
 
-    while (tableRows.length < visibleRows) {
+    while (tableRows.length < minimumRows) {
       tableRows.add(emptyRow());
     }
 
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+    return pw.Table(
+      border: pw.TableBorder.all(
+        color: PdfColors.black,
+        width: _pdfTableBorderWidth,
+      ),
+      columnWidths: const {
+        0: pw.FixedColumnWidth(38),
+        1: pw.FlexColumnWidth(),
+        2: pw.FixedColumnWidth(42),
+        3: pw.FixedColumnWidth(62),
+        4: pw.FixedColumnWidth(68),
+      },
       children: [
-        pw.Table(
-          border: pw.TableBorder.all(
-            color: PdfColors.black,
-            width: _pdfTableBorderWidth,
-          ),
-          columnWidths: const {
-            0: pw.FixedColumnWidth(38),
-            1: pw.FlexColumnWidth(),
-            2: pw.FixedColumnWidth(42),
-            3: pw.FixedColumnWidth(62),
-            4: pw.FixedColumnWidth(68),
-          },
+        pw.TableRow(
+          repeat: true,
           children: [
-            pw.TableRow(
-              children: [
-                _tableHeader('Item', center: true),
-                _tableHeader('Description', center: true),
-                _tableHeader('Qty', center: true),
-                _tableHeader('Unit\nCost', center: true),
-                _tableHeader('Amount', center: true),
-              ],
-            ),
-            ...tableRows.take(visibleRows),
+            _tableHeader('Item', center: true),
+            _tableHeader('Description', center: true),
+            _tableHeader('Qty', center: true),
+            _tableHeader('Unit\nCost', center: true),
+            _tableHeader('Amount', center: true),
           ],
         ),
-
-        pw.SizedBox(
-          height: 26,
-          child: pw.Row(
-            children: [
-              pw.Spacer(),
-              pw.Text(
-                'Grand Total',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(width: 8),
-              pw.Container(
-                width: 68,
-                height: 26,
-                alignment: pw.Alignment.centerRight,
-                padding: const pw.EdgeInsets.symmetric(horizontal: 5),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(
-                    color: PdfColors.black,
-                    width: _pdfTableBorderWidth,
-                  ),
-                ),
-                child: pw.Text(
-                  currency.format(total),
-                  textAlign: pw.TextAlign.right,
-                  style: pw.TextStyle(
-                    fontSize: 9,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+        ...tableRows,
       ],
+    );
+  }
+
+  pw.Widget _grandTotalRow(double total) {
+    final currency = NumberFormat('#,##0.00', 'en_US');
+
+    return pw.SizedBox(
+      height: 26,
+      child: pw.Row(
+        children: [
+          pw.Spacer(),
+          pw.Text(
+            'Grand Total',
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(width: 8),
+          pw.Container(
+            width: 68,
+            height: 26,
+            alignment: pw.Alignment.centerRight,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 5),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(
+                color: PdfColors.black,
+                width: _pdfTableBorderWidth,
+              ),
+            ),
+            child: pw.Text(
+              currency.format(total),
+              textAlign: pw.TextAlign.right,
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

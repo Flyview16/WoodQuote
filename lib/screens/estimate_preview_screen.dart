@@ -441,12 +441,10 @@ class _EstimatePreviewScreenState extends State<EstimatePreviewScreen> {
                                   constrained: false,
                                   child: RepaintBoundary(
                                     key: _documentKey,
-                                    child: SizedBox(
-                                      width: _paperWidth,
-                                      height: _paperHeight,
-                                      child: _EstimateDocumentView(
-                                        estimate: estimate,
-                                      ),
+                                    child: _EstimatePagesView(
+                                      estimate: estimate,
+                                      paperWidth: _paperWidth,
+                                      paperHeight: _paperHeight,
                                     ),
                                   ),
                                 ),
@@ -515,10 +513,54 @@ class _PreviewHeader extends StatelessWidget {
 const Color _ink = Color(0xFF1A1209);
 const Color _inkLight = Color(0xFF4A4035);
 
+class _EstimatePagesView extends StatelessWidget {
+  final Estimate estimate;
+  final double paperWidth;
+  final double paperHeight;
+
+  const _EstimatePagesView({
+    required this.estimate,
+    required this.paperWidth,
+    required this.paperHeight,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sortedItems = List<LineItem>.from(estimate.lineItems)
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+
+    final pages = _ItemsTable.pageCount(sortedItems);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(pages, (index) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: index == pages - 1 ? 0 : 16),
+          child: SizedBox(
+            width: paperWidth,
+            height: paperHeight,
+            child: _EstimateDocumentView(
+              estimate: estimate,
+              pageIndex: index,
+              pageCount: pages,
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
 class _EstimateDocumentView extends StatelessWidget {
   final Estimate estimate;
+  final int pageIndex;
+  final int pageCount;
 
-  const _EstimateDocumentView({required this.estimate});
+  const _EstimateDocumentView({
+    required this.estimate,
+    required this.pageIndex,
+    required this.pageCount,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -529,7 +571,17 @@ class _EstimateDocumentView extends StatelessWidget {
         ? 'No date'
         : DateFormat('MMM d, yyyy').format(estimate.date!);
 
-    final total = estimate.computedTotal;
+    final isFirstPage = pageIndex == 0;
+    final isLastPage = pageIndex == pageCount - 1;
+
+    final startRow = isFirstPage
+        ? 0
+        : _ItemsTable._visibleRows +
+              (pageIndex - 1) * _ItemsTable._continuationRows;
+
+    final rowLimit = isFirstPage
+        ? _ItemsTable._visibleRows
+        : _ItemsTable._continuationRows;
 
     return Container(
       width: double.infinity,
@@ -547,36 +599,36 @@ class _EstimateDocumentView extends StatelessWidget {
           ),
         ],
       ),
-
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _CompanyHeader(),
-          const SizedBox(height: _topSectionGap),
-          const _EstimateTitleDivider(),
-          const SizedBox(height: _topSectionGap),
-          _CustomerAndMetaSection(estimate: estimate, dateText: dateText),
-          const SizedBox(height: _topSectionGap),
-          _DescriptionSection(description: estimate.jobDescription),
-          const SizedBox(height: 15),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ItemsTable(items: documentItems, total: total),
+          if (isFirstPage) ...[
+            const _CompanyHeader(),
+            const SizedBox(height: _topSectionGap),
+            const _EstimateTitleDivider(),
+            const SizedBox(height: _topSectionGap),
+            _CustomerAndMetaSection(estimate: estimate, dateText: dateText),
+            const SizedBox(height: _topSectionGap),
+            _DescriptionSection(description: estimate.jobDescription),
+            const SizedBox(height: 15),
+          ],
 
-                const SizedBox(height: 35),
-
-                _DocumentFooter(
-                  dateText: dateText,
-                  validity: estimate.validity,
-                  termsOfPayment: estimate.termsOfPayment,
-                ),
-
-                const Spacer(),
-              ],
-            ),
+          _ItemsTable(
+            items: documentItems,
+            total: estimate.computedTotal,
+            startRow: startRow,
+            rowLimit: rowLimit,
+            showTotal: isLastPage,
           ),
+
+          if (isLastPage) ...[
+            const SizedBox(height: 35),
+            _DocumentFooter(
+              dateText: dateText,
+              validity: estimate.validity,
+              termsOfPayment: estimate.termsOfPayment,
+            ),
+          ],
         ],
       ),
     );
@@ -825,13 +877,48 @@ class _DescriptionSection extends StatelessWidget {
 class _ItemsTable extends StatelessWidget {
   final List<LineItem> items;
   final double total;
+  final int startRow;
+  final int rowLimit;
+  final bool showTotal;
 
-  const _ItemsTable({required this.items, required this.total});
+  const _ItemsTable({
+    required this.items,
+    required this.total,
+    this.startRow = 0,
+    this.rowLimit = 14,
+    this.showTotal = true,
+  });
 
   static const int _visibleRows = 14;
+  static const int _continuationRows = 28;
 
-  // Adjust this if the description breaks too early or too late.
   static const int _descriptionCharsPerRow = 55;
+
+  static int countRequiredRows(List<LineItem> items) {
+    int count = 0;
+
+    for (final item in items) {
+      if (item.type == LineItemType.header) {
+        if (item.addBlankRowBefore && count > 0) {
+          count++;
+        }
+      }
+
+      count += _splitDescriptionIntoRows(item.description ?? '').length;
+    }
+
+    return count;
+  }
+
+  static int pageCount(List<LineItem> items) {
+    final rowCount = countRequiredRows(items);
+
+    if (rowCount <= _visibleRows) return 1;
+
+    final remaining = rowCount - _visibleRows;
+
+    return 1 + (remaining / _continuationRows).ceil();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -983,11 +1070,11 @@ class _ItemsTable extends StatelessWidget {
                 _TableHeaderCell('Amount', center: true),
               ],
             ),
-            ...tableRows.take(_visibleRows),
+            ...tableRows.skip(startRow).take(rowLimit),
           ],
         ),
 
-        _GrandTotalRow(amountText: money.format(total)),
+        if (showTotal) _GrandTotalRow(amountText: money.format(total)),
       ],
     );
   }

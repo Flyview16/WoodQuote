@@ -104,25 +104,60 @@ class _CreateScreenState extends State<CreateScreen> {
   }
 
   void _addLineItem() {
+    final newItem = _EditableLineItem.normal();
+
     setState(() {
-      _items.add(_EditableLineItem.normal());
+      _items.add(newItem);
     });
+
+    _focusNewItem(newItem);
   }
 
   void _addHeader() {
+    final newHeader = _EditableLineItem.header();
+
     setState(() {
-      _items.add(_EditableLineItem.header());
+      _items.add(newHeader);
     });
+
+    _focusNewItem(newHeader);
   }
 
   void _removeItem(int index) {
+    final removed = _items[index];
+
     setState(() {
-      final removed = _items.removeAt(index);
-      removed.dispose();
+      _items.removeAt(index);
 
       if (_items.isEmpty) {
         _items.add(_EditableLineItem.normal());
       }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      removed.dispose();
+    });
+  }
+
+  void _focusNewItem(_EditableLineItem item) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || !_items.contains(item)) return;
+
+      final fieldContext = item.descriptionFieldKey.currentContext;
+
+      if (fieldContext == null) return;
+
+      await Scrollable.ensureVisible(
+        fieldContext,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        alignment: 0.25,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+      );
+
+      if (!mounted || !_items.contains(item)) return;
+
+      item.descriptionFocusNode.requestFocus();
     });
   }
 
@@ -301,7 +336,7 @@ class _CreateScreenState extends State<CreateScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             sliver: SliverReorderableList(
               itemCount: _items.length,
-              onReorder: _reorderItem,
+              onReorderItem: _reorderItem,
 
               proxyDecorator: (child, index, animation) {
                 return Material(type: MaterialType.transparency, child: child);
@@ -476,7 +511,11 @@ class _EditableLineItem {
   bool get hasCalculatedTotal =>
       type == LineItemType.normal && unitPrice != null;
 
+  final FocusNode descriptionFocusNode = FocusNode();
+  final GlobalKey descriptionFieldKey = GlobalKey();
+
   void dispose() {
+    descriptionFocusNode.dispose();
     descriptionController.dispose();
     quantityController.dispose();
     unitPriceController.dispose();
@@ -643,11 +682,13 @@ class _LabeledInput extends StatelessWidget {
   final ValueChanged<String>? onChanged;
   final IconData? suffixIcon;
   final int maxLines;
+  final FocusNode? focusNode;
 
   const _LabeledInput({
     required this.label,
     required this.hint,
     required this.controller,
+    this.focusNode,
     this.readOnly = false,
     this.onTap,
     this.onChanged,
@@ -671,6 +712,7 @@ class _LabeledInput extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         TextFormField(
+          focusNode: focusNode,
           controller: controller,
           readOnly: readOnly,
           onTap: onTap,
@@ -808,6 +850,7 @@ class _HeaderCard extends StatelessWidget {
             label: 'SECTION HEADER',
             hint: 'e.g. Materials, Labour, Finishing',
             controller: item.descriptionController,
+            focusNode: item.descriptionFocusNode,
             onChanged: (_) => onChanged(),
           ),
 
@@ -929,6 +972,7 @@ class _LineItemCard extends StatelessWidget {
             label: 'ITEM DESCRIPTION',
             hint: 'e.g. Mahogany Timber Planks',
             controller: item.descriptionController,
+            focusNode: item.descriptionFocusNode,
             onChanged: (_) => onChanged(),
           ),
 
